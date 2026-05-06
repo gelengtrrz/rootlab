@@ -1,8 +1,10 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect } from "react";
 import { v4 as uuidv4 } from "uuid";
-import { doc, getDoc, setDoc, deleteDoc } from "firebase/firestore";
-import { db } from "../../lib/firebase";
+import { db } from "../../lib/supabase";
+import type { ProfileRow, ProcessRow } from "../../lib/supabase";
 import { useAuth } from "./AuthContext";
+
+// ── Domain types ─────────────────────────────────────────────────────────────
 
 export type Discipline =
   | "Música"
@@ -33,7 +35,7 @@ export interface ProcessItem {
 }
 
 export interface Artist {
-  id: string;
+  id: string; // Firebase UID for real users; static id for demo entries
   slug: string;
   name: string;
   location: string;
@@ -64,7 +66,7 @@ interface RootLabContextProps {
   updateArtist: (artist: Artist) => void;
   addProject: (project: Omit<Project, "id">) => Project;
   addProcessItem: (item: Omit<ProcessItem, "id" | "createdAt">) => void;
-  addProcessExtension: (itemId: string, extension: Omit<ProcessExtension, "id" | "createdAt">) => void;
+  addProcessExtension: (itemId: string, ext: Omit<ProcessExtension, "id" | "createdAt">) => void;
   deleteProcessItem: (itemId: string) => void;
   deleteArtist: (artistId: string) => void;
   updateArtistTheme: (artistId: string, font: string, color: string) => void;
@@ -73,9 +75,73 @@ interface RootLabContextProps {
   getArtistProjects: (artistId: string) => Project[];
 }
 
-// ── Demo artists (always visible in directory) ──────────────────────────────
+// ── Row ↔ Domain mappers ──────────────────────────────────────────────────────
 
-const mockArtists: Artist[] = [
+function profileToArtist(row: ProfileRow): Artist {
+  return {
+    id: row.user_id,
+    slug: row.slug || "",
+    name: row.name || "",
+    location: row.location || "",
+    discipline: (row.discipline as Discipline) || "Artes plásticas",
+    bio: row.bio || "",
+    avatarUrl: row.avatar_url || "",
+    contactEmail: row.contact_email ?? undefined,
+    themeFont: row.theme_font ?? undefined,
+    themeColor: row.theme_color ?? undefined,
+  };
+}
+
+function artistToProfileRow(
+  artist: Artist,
+  userId: string
+): Omit<ProfileRow, "created_at"> {
+  return {
+    user_id: userId,
+    name: artist.name,
+    slug: artist.slug,
+    location: artist.location,
+    discipline: artist.discipline,
+    bio: artist.bio,
+    avatar_url: artist.avatarUrl,
+    contact_email: artist.contactEmail ?? null,
+    theme_font: artist.themeFont ?? null,
+    theme_color: artist.themeColor ?? null,
+    updated_at: new Date().toISOString(),
+  };
+}
+
+function processRowToItem(row: ProcessRow): ProcessItem {
+  return {
+    id: row.id,
+    artistId: row.user_id,
+    projectId: row.project_id ?? undefined,
+    type: row.type as ProcessItem["type"],
+    content: row.content || "",
+    caption: row.caption ?? undefined,
+    extendedContent: row.extended_content ?? undefined,
+    extensions: row.extensions || [],
+    createdAt: row.created_at,
+  };
+}
+
+function itemToProcessRow(item: ProcessItem, userId: string): ProcessRow {
+  return {
+    id: item.id,
+    user_id: userId,
+    project_id: item.projectId ?? null,
+    type: item.type,
+    content: item.content,
+    caption: item.caption ?? null,
+    extended_content: item.extendedContent ?? null,
+    extensions: item.extensions || [],
+    created_at: item.createdAt,
+  };
+}
+
+// ── Static demo data ──────────────────────────────────────────────────────────
+
+const MOCK_ARTISTS: Artist[] = [
   {
     id: "a1",
     slug: "elena-koval",
@@ -109,7 +175,7 @@ const mockArtists: Artist[] = [
   },
 ];
 
-const mockProjects: Project[] = [
+const MOCK_PROJECTS: Project[] = [
   {
     id: "p1",
     artistId: "a1",
@@ -139,7 +205,7 @@ const mockProjects: Project[] = [
   },
 ];
 
-const mockProcessItems: ProcessItem[] = [
+const MOCK_PROCESS: ProcessItem[] = [
   {
     id: "i1",
     artistId: "a1",
@@ -201,201 +267,202 @@ const mockProcessItems: ProcessItem[] = [
   },
 ];
 
-// ── Context ─────────────────────────────────────────────────────────────────
+// ── Context ───────────────────────────────────────────────────────────────────
 
 const RootLabContext = createContext<RootLabContextProps | undefined>(undefined);
+
+/** Merge Supabase rows into a base array, replacing any entry with the same id. */
+function mergeById<T extends { id: string }>(base: T[], incoming: T[]): T[] {
+  const incomingIds = new Set(incoming.map((x) => x.id));
+  return [...base.filter((x) => !incomingIds.has(x.id)), ...incoming];
+}
 
 export function RootLabProvider({ children }: { children: ReactNode }) {
   const { firebaseUser, authLoading } = useAuth();
 
-  const [artists, setArtists] = useState<Artist[]>(() => {
-    const saved = localStorage.getItem("rootlab_artists");
-    return saved ? JSON.parse(saved) : mockArtists;
-  });
+  const [artists, setArtists] = useState<Artist[]>(MOCK_ARTISTS);
   const [projects, setProjects] = useState<Project[]>(() => {
-    const saved = localStorage.getItem("rootlab_projects");
-    return saved ? JSON.parse(saved) : mockProjects;
+    try {
+      const raw = localStorage.getItem("rootlab_projects");
+      return raw ? JSON.parse(raw) : MOCK_PROJECTS;
+    } catch {
+      return MOCK_PROJECTS;
+    }
   });
-  const [processFeed, setProcessFeed] = useState<ProcessItem[]>(() => {
-    const saved = localStorage.getItem("rootlab_process");
-    return saved ? JSON.parse(saved) : mockProcessItems;
-  });
+  const [processFeed, setProcessFeed] = useState<ProcessItem[]>(MOCK_PROCESS);
   const [currentUser, setCurrentUserState] = useState<Artist | null>(null);
 
-  // ── Sync currentUser with Firebase auth state ────────────────────────────
+  // ── Load all public Supabase data on mount ────────────────────────────────
+  useEffect(() => {
+    (async () => {
+      // Profiles → artists
+      const { data: profileRows, error: pe } = await db.profiles.loadAll();
+      if (!pe && profileRows && profileRows.length > 0) {
+        const supaArtists = profileRows.map(profileToArtist);
+        setArtists((prev) => mergeById(prev, supaArtists));
+      }
+
+      // Processes
+      const { data: processRows, error: pre } = await db.processes.loadAll();
+      if (!pre && processRows && processRows.length > 0) {
+        const supaProcesses = processRows.map(processRowToItem);
+        setProcessFeed((prev) => mergeById(prev, supaProcesses));
+      }
+    })();
+  }, []);
+
+  // ── Load current user profile from Supabase when Firebase auth changes ────
   useEffect(() => {
     if (authLoading) return;
-
     if (!firebaseUser) {
       setCurrentUserState(null);
-      // Remove any real user from the artists list (keep only mock ones)
-      setArtists(mockArtists);
       return;
     }
 
-    // Firebase user is signed in — load their profile from Firestore
-    const loadProfile = async () => {
-      try {
-        const docRef = doc(db, "users", firebaseUser.uid);
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          const profile = docSnap.data() as Artist;
-          setCurrentUserState(profile);
-          // Merge into artists list (replace if already exists)
-          setArtists((prev) => {
-            const withoutUser = prev.filter((a) => a.id !== profile.id);
-            return [...withoutUser, profile];
-          });
-        } else {
-          // Authenticated but no profile yet
-          setCurrentUserState(null);
-        }
-      } catch (err) {
-        console.error("Error loading Firestore profile:", err);
+    (async () => {
+      const { data: rows, error } = await db.profiles.getByUserId(firebaseUser.uid);
+      if (!error && rows && rows.length > 0) {
+        const artist = profileToArtist(rows[0]);
+        setCurrentUserState(artist);
+        setArtists((prev) => mergeById(prev, [artist]));
+      } else {
         setCurrentUserState(null);
       }
-    };
-
-    loadProfile();
+    })();
   }, [firebaseUser, authLoading]);
 
+  // Persist projects locally
   useEffect(() => {
-    localStorage.setItem("rootlab_artists", JSON.stringify(artists));
-  }, [artists]);
-
-  useEffect(() => {
-    localStorage.setItem("rootlab_projects", JSON.stringify(projects));
+    try {
+      localStorage.setItem("rootlab_projects", JSON.stringify(projects));
+    } catch {/* storage quota */ }
   }, [projects]);
 
-  useEffect(() => {
-    localStorage.setItem("rootlab_process", JSON.stringify(processFeed));
-  }, [processFeed]);
-
-  // ── setCurrentUser (also updates Firestore if real user) ─────────────────
-  const handleSetCurrentUser = (artist: Artist | null) => {
-    setCurrentUserState(artist);
-  };
-
   // ── addArtist ─────────────────────────────────────────────────────────────
-  const addArtist = (artistData: Omit<Artist, "id" | "slug">) => {
-    const slug = (artistData.name || "artista-anonimo")
+  const addArtist = (artistData: Omit<Artist, "id" | "slug">): Artist => {
+    const uid = firebaseUser?.uid ?? uuidv4();
+    const rawSlug = (artistData.name || "artista")
       .toLowerCase()
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/(^-|-$)/g, "");
-
-    // Use Firebase uid if available, otherwise uuid (should always have uid when creating a profile)
-    const id = firebaseUser ? firebaseUser.uid : uuidv4();
+    const slug = `${rawSlug}-${uid.slice(0, 6)}`;
 
     const newArtist: Artist = {
       ...artistData,
-      id,
+      id: uid,
       slug,
-      avatarUrl: artistData.avatarUrl || "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1080",
+      avatarUrl:
+        artistData.avatarUrl ||
+        "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1080",
       themeFont: artistData.themeFont || "font-mono",
       themeColor: artistData.themeColor || "#1a1a1a",
     };
 
-    setArtists((prev) => {
-      const without = prev.filter((a) => a.id !== newArtist.id);
-      return [...without, newArtist];
-    });
+    setArtists((prev) => mergeById(prev, [newArtist]));
+    setCurrentUserState(newArtist);
 
-    // Write to Firestore if real Firebase user
     if (firebaseUser) {
-      setDoc(doc(db, "users", firebaseUser.uid), newArtist).catch((err) =>
-        console.error("Firestore write error:", err)
-      );
+      db.profiles
+        .upsert(artistToProfileRow(newArtist, firebaseUser.uid))
+        .then(({ error }) => {
+          if (error) console.error("Supabase profile upsert:", error);
+        });
     }
 
     return newArtist;
   };
 
   // ── updateArtist ──────────────────────────────────────────────────────────
-  const updateArtist = (updatedArtist: Artist) => {
-    setArtists((prev) => {
-      const exists = prev.some((a) => a.id === updatedArtist.id);
-      return exists
-        ? prev.map((a) => (a.id === updatedArtist.id ? updatedArtist : a))
-        : [...prev, updatedArtist];
-    });
+  const updateArtist = (updated: Artist): void => {
+    setArtists((prev) => mergeById(prev, [updated]));
+    if (currentUser?.id === updated.id) setCurrentUserState(updated);
 
-    if (currentUser?.id === updatedArtist.id) {
-      setCurrentUserState(updatedArtist);
-    }
-
-    // Sync to Firestore if this is the real Firebase user
-    if (firebaseUser && updatedArtist.id === firebaseUser.uid) {
-      setDoc(doc(db, "users", firebaseUser.uid), updatedArtist, { merge: true }).catch((err) =>
-        console.error("Firestore update error:", err)
-      );
+    if (firebaseUser && updated.id === firebaseUser.uid) {
+      db.profiles
+        .upsert(artistToProfileRow(updated, firebaseUser.uid))
+        .then(({ error }) => {
+          if (error) console.error("Supabase profile update:", error);
+        });
     }
   };
 
-  // ── addProject ────────────────────────────────────────────────────────────
-  const addProject = (projectData: Omit<Project, "id">) => {
-    const newProject: Project = { ...projectData, id: uuidv4() };
-    setProjects((prev) => [...prev, newProject]);
-    return newProject;
+  // ── addProject (local) ────────────────────────────────────────────────────
+  const addProject = (projectData: Omit<Project, "id">): Project => {
+    const p: Project = { ...projectData, id: uuidv4() };
+    setProjects((prev) => [...prev, p]);
+    return p;
   };
 
   // ── addProcessItem ────────────────────────────────────────────────────────
-  const addProcessItem = (itemData: Omit<ProcessItem, "id" | "createdAt">) => {
-    const newItem: ProcessItem = {
+  const addProcessItem = (itemData: Omit<ProcessItem, "id" | "createdAt">): void => {
+    const item: ProcessItem = {
       ...itemData,
       id: uuidv4(),
       createdAt: new Date().toISOString(),
       extensions: [],
     };
-    setProcessFeed((prev) => [newItem, ...prev]);
+    setProcessFeed((prev) => [item, ...prev]);
+
+    if (firebaseUser && itemData.artistId === firebaseUser.uid) {
+      db.processes
+        .insert(itemToProcessRow(item, firebaseUser.uid))
+        .then(({ error }) => {
+          if (error) console.error("Supabase process insert:", error);
+        });
+    }
   };
 
-  // ── addProcessExtension ───────────────────────────────────────────────────
+  // ── addProcessExtension (local) ───────────────────────────────────────────
   const addProcessExtension = (
     itemId: string,
-    extensionData: Omit<ProcessExtension, "id" | "createdAt">
-  ) => {
+    extData: Omit<ProcessExtension, "id" | "createdAt">
+  ): void => {
     setProcessFeed((prev) =>
       prev.map((p) => {
-        if (p.id === itemId) {
-          const newExt: ProcessExtension = {
-            ...extensionData,
-            id: uuidv4(),
-            createdAt: new Date().toISOString(),
-          };
-          return { ...p, extensions: [...(p.extensions || []), newExt] };
-        }
-        return p;
+        if (p.id !== itemId) return p;
+        const ext: ProcessExtension = {
+          ...extData,
+          id: uuidv4(),
+          createdAt: new Date().toISOString(),
+        };
+        return { ...p, extensions: [...(p.extensions || []), ext] };
       })
     );
   };
 
   // ── deleteProcessItem ─────────────────────────────────────────────────────
-  const deleteProcessItem = (itemId: string) => {
+  const deleteProcessItem = (itemId: string): void => {
     setProcessFeed((prev) => prev.filter((p) => p.id !== itemId));
+    if (firebaseUser) {
+      db.processes
+        .delete(itemId)
+        .then(({ error }) => {
+          if (error) console.error("Supabase process delete:", error);
+        });
+    }
   };
 
   // ── deleteArtist ──────────────────────────────────────────────────────────
-  const deleteArtist = (artistId: string) => {
+  const deleteArtist = (artistId: string): void => {
     setArtists((prev) => prev.filter((a) => a.id !== artistId));
     setProjects((prev) => prev.filter((p) => p.artistId !== artistId));
     setProcessFeed((prev) => prev.filter((p) => p.artistId !== artistId));
+    if (currentUser?.id === artistId) setCurrentUserState(null);
 
-    if (currentUser?.id === artistId) {
-      setCurrentUserState(null);
-    }
-
-    // Delete from Firestore if real Firebase user
     if (firebaseUser && artistId === firebaseUser.uid) {
-      deleteDoc(doc(db, "users", firebaseUser.uid)).catch((err) =>
-        console.error("Firestore delete error:", err)
-      );
+      db.profiles.delete(firebaseUser.uid).then(({ error }) => {
+        if (error) console.error("Supabase profile delete:", error);
+      });
+      db.processes.deleteByUser(firebaseUser.uid).then(({ error }) => {
+        if (error) console.error("Supabase processes delete:", error);
+      });
     }
   };
 
   // ── updateArtistTheme ─────────────────────────────────────────────────────
-  const updateArtistTheme = (artistId: string, font: string, color: string) => {
+  const updateArtistTheme = (artistId: string, font: string, color: string): void => {
     setArtists((prev) =>
       prev.map((a) => (a.id === artistId ? { ...a, themeFont: font, themeColor: color } : a))
     );
@@ -409,7 +476,8 @@ export function RootLabProvider({ children }: { children: ReactNode }) {
       .filter((p) => p.artistId === artistId && (!projectId || p.projectId === projectId))
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
-  const getArtistProjects = (artistId: string) => projects.filter((p) => p.artistId === artistId);
+  const getArtistProjects = (artistId: string) =>
+    projects.filter((p) => p.artistId === artistId);
 
   return (
     <RootLabContext.Provider
@@ -418,7 +486,7 @@ export function RootLabProvider({ children }: { children: ReactNode }) {
         projects,
         processFeed,
         currentUser,
-        setCurrentUser: handleSetCurrentUser,
+        setCurrentUser: setCurrentUserState,
         addArtist,
         updateArtist,
         addProject,
@@ -438,7 +506,7 @@ export function RootLabProvider({ children }: { children: ReactNode }) {
 }
 
 export function useRootLab() {
-  const context = useContext(RootLabContext);
-  if (!context) throw new Error("useRootLab must be used within a RootLabProvider");
-  return context;
+  const ctx = useContext(RootLabContext);
+  if (!ctx) throw new Error("useRootLab must be used within a RootLabProvider");
+  return ctx;
 }
