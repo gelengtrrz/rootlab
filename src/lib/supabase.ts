@@ -39,6 +39,16 @@ export interface ProfileRow {
   updated_at?: string;
 }
 
+export interface ProjectRow {
+  id: string;
+  user_id: string;
+  title: string;
+  description: string | null;
+  cover_image: string | null;
+  discipline: string | null;
+  created_at: string;
+}
+
 export interface ProcessRow {
   id: string;
   user_id: string;
@@ -340,6 +350,28 @@ export const db = {
     /** Delete a profile by Supabase user UID. */
     delete: (uid: string) =>
       restDelete("profiles", { user_id: `eq.${uid}` }),
+  },
+
+  projects: {
+    /** Read all projects, newest first — visible to every visitor. */
+    loadAll: () =>
+      restGet<ProjectRow[]>("projects", { order: "created_at.desc" }),
+
+    /** Insert a new project item. */
+    insert: (row: ProjectRow) =>
+      restPost<ProjectRow>("projects", row, "return=representation"),
+
+    /** Delete a single project by UUID. */
+    delete: (id: string) =>
+      restDelete("projects", { id: `eq.${id}` }),
+
+    /** Delete all projects owned by a given Supabase user UID. */
+    deleteByUser: (uid: string) =>
+      restDelete("projects", { user_id: `eq.${uid}` }),
+
+    /** Patch (update) fields on a single project item. */
+    update: (id: string, updates: Partial<Omit<ProjectRow, "id" | "user_id" | "created_at">>) =>
+      restPatch<ProjectRow>("projects", { id: `eq.${id}` }, updates),
   },
 
   processes: {

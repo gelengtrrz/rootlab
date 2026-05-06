@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { db } from "../../lib/supabase";
-import type { ProfileRow, ProcessRow } from "../../lib/supabase";
+import type { ProfileRow, ProjectRow, ProcessRow } from "../../lib/supabase";
 import { useAuth } from "./AuthContext";
 
 // ── Domain types ─────────────────────────────────────────────────────────────
@@ -111,6 +111,29 @@ function artistToProfileRow(
     theme_font: artist.themeFont ?? null,
     theme_color: artist.themeColor ?? null,
     updated_at: new Date().toISOString(),
+  };
+}
+
+function projectToRow(project: Project, userId: string): ProjectRow {
+  return {
+    id: project.id,
+    user_id: userId,
+    title: project.title,
+    description: project.description || null,
+    cover_image: project.coverImage || null,
+    discipline: project.discipline || null,
+    created_at: new Date().toISOString(),
+  };
+}
+
+function rowToProject(row: ProjectRow): Project {
+  return {
+    id: row.id,
+    artistId: row.user_id,
+    title: row.title,
+    description: row.description || "",
+    coverImage: row.cover_image || "",
+    discipline: (row.discipline as Discipline) || "Artes plásticas",
   };
 }
 
@@ -284,14 +307,7 @@ export function RootLabProvider({ children }: { children: ReactNode }) {
   const { firebaseUser, authLoading } = useAuth();
 
   const [artists, setArtists] = useState<Artist[]>(MOCK_ARTISTS);
-  const [projects, setProjects] = useState<Project[]>(() => {
-    try {
-      const raw = localStorage.getItem("rootlab_projects");
-      return raw ? JSON.parse(raw) : MOCK_PROJECTS;
-    } catch {
-      return MOCK_PROJECTS;
-    }
-  });
+  const [projects, setProjects] = useState<Project[]>(MOCK_PROJECTS);
   const [processFeed, setProcessFeed] = useState<ProcessItem[]>(MOCK_PROCESS);
   const [currentUser, setCurrentUserState] = useState<Artist | null>(null);
 
@@ -305,6 +321,13 @@ export function RootLabProvider({ children }: { children: ReactNode }) {
         setArtists((prev) => mergeById(prev, supaArtists));
       }
 
+      // Projects (public read)
+      const { data: projectRows, error: prje } = await db.projects.loadAll();
+      if (!prje && projectRows && projectRows.length > 0) {
+        const supaProjects = projectRows.map(rowToProject);
+        setProjects((prev) => mergeById(prev, supaProjects));
+      }
+
       // Processes
       const { data: processRows, error: pre } = await db.processes.loadAll();
       if (!pre && processRows && processRows.length > 0) {
@@ -314,7 +337,7 @@ export function RootLabProvider({ children }: { children: ReactNode }) {
     })();
   }, []);
 
-  // ── Load current user profile from Supabase when Firebase auth changes ────
+  // ── Load / reload this user's full data whenever they log in ──────────────
   useEffect(() => {
     if (authLoading) return;
     if (!firebaseUser) {
@@ -323,6 +346,7 @@ export function RootLabProvider({ children }: { children: ReactNode }) {
     }
 
     (async () => {
+      // 1. Profile
       const { data: rows, error } = await db.profiles.getByUserId(firebaseUser.uid);
       if (!error && rows && rows.length > 0) {
         const artist = profileToArtist(rows[0]);
@@ -331,15 +355,22 @@ export function RootLabProvider({ children }: { children: ReactNode }) {
       } else {
         setCurrentUserState(null);
       }
+
+      // 2. User's projects — ensures fresh data even from another device
+      const { data: projRows, error: prje } = await db.projects.loadAll();
+      if (!prje && projRows && projRows.length > 0) {
+        const userProjects = projRows.map(rowToProject);
+        setProjects((prev) => mergeById(prev, userProjects));
+      }
+
+      // 3. User's processes — reload to pick up any changes from other sessions
+      const { data: procRows, error: proce } = await db.processes.loadAll();
+      if (!proce && procRows && procRows.length > 0) {
+        const userProcesses = procRows.map(processRowToItem);
+        setProcessFeed((prev) => mergeById(prev, userProcesses));
+      }
     })();
   }, [firebaseUser, authLoading]);
-
-  // Persist projects locally
-  useEffect(() => {
-    try {
-      localStorage.setItem("rootlab_projects", JSON.stringify(projects));
-    } catch {/* storage quota */ }
-  }, [projects]);
 
   // ── addArtist ─────────────────────────────────────────────────────────────
   const addArtist = (artistData: Omit<Artist, "id" | "slug">): Artist => {
@@ -391,16 +422,38 @@ export function RootLabProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  // ── addProject (local) ────────────────────────────────────────────────────
+  // ── addProject ────────────────────────────────────────────────────────────
   const addProject = (projectData: Omit<Project, "id">): Project => {
     const p: Project = { ...projectData, id: uuidv4() };
     setProjects((prev) => [...prev, p]);
+
+    if (firebaseUser) {
+      db.projects
+        .insert(projectToRow(p, firebaseUser.uid))
+        .then(({ error }) => {
+          if (error) console.error("Supabase project insert:", error);
+        });
+    }
+
     return p;
   };
 
-  // ── updateProject (local + localStorage via effect) ───────────────────────
+  // ── updateProject ─────────────────────────────────────────────────────────
   const updateProject = (updated: Project): void => {
     setProjects((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+
+    if (firebaseUser && updated.artistId === firebaseUser.uid) {
+      db.projects
+        .update(updated.id, {
+          title: updated.title,
+          description: updated.description || null,
+          cover_image: updated.coverImage || null,
+          discipline: updated.discipline || null,
+        })
+        .then(({ error }) => {
+          if (error) console.error("Supabase project update:", error);
+        });
+    }
   };
 
   // ── deleteProject ─────────────────────────────────────────────────────────
@@ -410,6 +463,9 @@ export function RootLabProvider({ children }: { children: ReactNode }) {
     setProjects((prev) => prev.filter((p) => p.id !== projectId));
     setProcessFeed((prev) => prev.filter((p) => p.projectId !== projectId));
     if (firebaseUser) {
+      db.projects.delete(projectId).then(({ error }) => {
+        if (error) console.error("Supabase project delete:", error);
+      });
       toDelete.forEach((item) => {
         db.processes.delete(item.id).then(({ error }) => {
           if (error) console.error("Supabase process delete (project):", error);
@@ -496,6 +552,9 @@ export function RootLabProvider({ children }: { children: ReactNode }) {
     if (firebaseUser && artistId === firebaseUser.uid) {
       db.profiles.delete(firebaseUser.uid).then(({ error }) => {
         if (error) console.error("Supabase profile delete:", error);
+      });
+      db.projects.deleteByUser(firebaseUser.uid).then(({ error }) => {
+        if (error) console.error("Supabase projects delete:", error);
       });
       db.processes.deleteByUser(firebaseUser.uid).then(({ error }) => {
         if (error) console.error("Supabase processes delete:", error);
