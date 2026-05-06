@@ -279,6 +279,27 @@ async function restPost<T>(
   }
 }
 
+async function restPatch<T>(
+  table: string,
+  params: Record<string, string>,
+  body: object
+): Promise<DbResult<T>> {
+  try {
+    const url = new URL(`${REST_BASE}/${table}`);
+    for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
+    const res = await fetch(url.toString(), {
+      method: "PATCH",
+      headers: { ...makeHeaders(true), Prefer: "return=representation" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) return { data: null, error: await res.text() };
+    const json = await res.json();
+    return { data: (Array.isArray(json) ? json[0] : json) as T, error: null };
+  } catch (e: any) {
+    return { data: null, error: String(e?.message ?? e) };
+  }
+}
+
 async function restDelete(
   table: string,
   params: Record<string, string>
@@ -337,5 +358,9 @@ export const db = {
     /** Delete all processes owned by a given Supabase user UID. */
     deleteByUser: (uid: string) =>
       restDelete("processes", { user_id: `eq.${uid}` }),
+
+    /** Patch (update) fields on a single process item. */
+    update: (id: string, updates: Partial<Omit<ProcessRow, "id" | "user_id" | "created_at">>) =>
+      restPatch<ProcessRow>("processes", { id: `eq.${id}` }, updates),
   },
 };

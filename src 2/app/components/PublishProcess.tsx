@@ -18,6 +18,7 @@ export function PublishProcess() {
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [creatingNew, setCreatingNew] = useState(false);
   const [newProject, setNewProject] = useState({ title: "", description: "" });
+  const [newProjectCover, setNewProjectCover] = useState<string | null>(null);
 
   // Content step state
   const [formData, setFormData] = useState({
@@ -96,17 +97,32 @@ export function PublishProcess() {
     setSelectedProjectId(null);
   };
 
+  const handleCoverChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => setNewProjectCover(reader.result as string);
+      reader.readAsDataURL(file);
+    } else {
+      setNewProjectCover(null);
+    }
+  };
+
   const handleProjectContinue = () => {
     if (creatingNew) {
       if (!newProject.title.trim() || !newProject.description.trim()) {
         toast.error("Completa el título y la descripción del proyecto.");
         return;
       }
+      if (!newProjectCover) {
+        toast.error("Añade una foto de portada para el proyecto.");
+        return;
+      }
       const created = addProject({
         artistId: currentUser.id,
         title: newProject.title.trim(),
         description: newProject.description.trim(),
-        coverImage: "",
+        coverImage: newProjectCover,
         discipline: currentUser.discipline
       });
       setSelectedProjectId(created.id);
@@ -234,11 +250,18 @@ export function PublishProcess() {
                               : "border-black/20 text-[#1a1a1a] hover:border-black/50"
                           }`}
                         >
-                          <div>
-                            <p className="font-serif italic text-lg leading-tight">{project.title}</p>
-                            <p className={`font-sans text-xs mt-1 ${selectedProjectId === project.id && !creatingNew ? "text-white/60" : "text-gray-500"}`}>
-                              {project.description}
-                            </p>
+                          <div className="flex items-center gap-4">
+                            {project.coverImage && (
+                              <div className="w-10 h-10 flex-shrink-0 overflow-hidden">
+                                <img src={project.coverImage} alt="" className="w-full h-full object-cover" />
+                              </div>
+                            )}
+                            <div>
+                              <p className="font-serif italic text-lg leading-tight">{project.title}</p>
+                              <p className={`font-sans text-xs mt-1 ${selectedProjectId === project.id && !creatingNew ? "text-white/60" : "text-gray-500"}`}>
+                                {project.description}
+                              </p>
+                            </div>
                           </div>
                           {selectedProjectId === project.id && !creatingNew && (
                             <Check size={18} className="flex-shrink-0 mt-1" />
@@ -287,6 +310,36 @@ export function PublishProcess() {
                               placeholder="Ej. Serie Umbral, Álbum sin título..."
                             />
                           </div>
+
+                          {/* Cover photo — required */}
+                          <div className="space-y-3">
+                            <label className="font-sans text-xs uppercase tracking-widest text-gray-500">
+                              Foto de portada <span className="text-[#cc4f38]">*</span>
+                            </label>
+                            <div className="flex items-start gap-6">
+                              <div className="w-20 h-20 flex-shrink-0 overflow-hidden border border-black/20 bg-gray-100">
+                                {newProjectCover ? (
+                                  <img src={newProjectCover} alt="Portada" className="w-full h-full object-cover" />
+                                ) : (
+                                  <div className="w-full h-full flex items-center justify-center text-gray-400">
+                                    <ImageIcon size={24} />
+                                  </div>
+                                )}
+                              </div>
+                              <div className="flex-grow">
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  onChange={handleCoverChange}
+                                  className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:border-0 file:text-xs file:font-sans file:uppercase file:tracking-widest file:bg-gray-100 file:text-gray-700 hover:file:bg-gray-200 cursor-pointer"
+                                />
+                                <p className="mt-2 font-sans text-xs text-gray-400">
+                                  Una foto representativa del proyecto. Podrás cambiarla después.
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+
                           <div className="space-y-2">
                             <label className="font-sans text-xs uppercase tracking-widest text-gray-500">
                               Descripción del proyecto
@@ -327,18 +380,29 @@ export function PublishProcess() {
                 className="space-y-10"
               >
                 {/* Project context banner */}
-                <div className="border-l-4 border-[#cc4f38] pl-5 py-1">
-                  <p className="font-sans text-xs uppercase tracking-widest text-gray-500">Proyecto</p>
-                  <p className="font-serif italic text-xl text-[#1a1a1a] mt-1">
-                    {selectedProject?.title || newProject.title}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => setStep("project")}
-                    className="font-sans text-xs uppercase tracking-widest text-gray-400 hover:text-[#cc4f38] transition-colors mt-2"
-                  >
-                    ← Cambiar proyecto
-                  </button>
+                <div className="border-l-4 border-[#cc4f38] pl-5 py-1 flex items-center gap-4">
+                  {(selectedProject?.coverImage || newProjectCover) && (
+                    <div className="w-10 h-10 flex-shrink-0 overflow-hidden">
+                      <img
+                        src={selectedProject?.coverImage || newProjectCover || ""}
+                        alt=""
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                  )}
+                  <div>
+                    <p className="font-sans text-xs uppercase tracking-widest text-gray-500">Proyecto</p>
+                    <p className="font-serif italic text-xl text-[#1a1a1a] mt-1">
+                      {selectedProject?.title || newProject.title}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setStep("project")}
+                      className="font-sans text-xs uppercase tracking-widest text-gray-400 hover:text-[#cc4f38] transition-colors mt-2"
+                    >
+                      ← Cambiar proyecto
+                    </button>
+                  </div>
                 </div>
 
                 <p className="font-sans text-gray-600 max-w-lg">

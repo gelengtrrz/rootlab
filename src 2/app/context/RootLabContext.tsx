@@ -65,7 +65,10 @@ interface RootLabContextProps {
   addArtist: (artist: Omit<Artist, "id" | "slug">) => Artist;
   updateArtist: (artist: Artist) => void;
   addProject: (project: Omit<Project, "id">) => Project;
+  updateProject: (project: Project) => void;
+  deleteProject: (projectId: string) => void;
   addProcessItem: (item: Omit<ProcessItem, "id" | "createdAt">) => void;
+  updateProcessItem: (itemId: string, updates: Partial<Pick<ProcessItem, "caption" | "extendedContent" | "content">>) => void;
   addProcessExtension: (itemId: string, ext: Omit<ProcessExtension, "id" | "createdAt">) => void;
   deleteProcessItem: (itemId: string) => void;
   deleteArtist: (artistId: string) => void;
@@ -395,6 +398,26 @@ export function RootLabProvider({ children }: { children: ReactNode }) {
     return p;
   };
 
+  // ── updateProject (local + localStorage via effect) ───────────────────────
+  const updateProject = (updated: Project): void => {
+    setProjects((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+  };
+
+  // ── deleteProject ─────────────────────────────────────────────────────────
+  const deleteProject = (projectId: string): void => {
+    // Snapshot items to delete before state update
+    const toDelete = processFeed.filter((p) => p.projectId === projectId);
+    setProjects((prev) => prev.filter((p) => p.id !== projectId));
+    setProcessFeed((prev) => prev.filter((p) => p.projectId !== projectId));
+    if (firebaseUser) {
+      toDelete.forEach((item) => {
+        db.processes.delete(item.id).then(({ error }) => {
+          if (error) console.error("Supabase process delete (project):", error);
+        });
+      });
+    }
+  };
+
   // ── addProcessItem ────────────────────────────────────────────────────────
   const addProcessItem = (itemData: Omit<ProcessItem, "id" | "createdAt">): void => {
     const item: ProcessItem = {
@@ -411,6 +434,25 @@ export function RootLabProvider({ children }: { children: ReactNode }) {
         .then(({ error }) => {
           if (error) console.error("Supabase process insert:", error);
         });
+    }
+  };
+
+  // ── updateProcessItem ─────────────────────────────────────────────────────
+  const updateProcessItem = (
+    itemId: string,
+    updates: Partial<Pick<ProcessItem, "caption" | "extendedContent" | "content">>
+  ): void => {
+    setProcessFeed((prev) =>
+      prev.map((p) => (p.id === itemId ? { ...p, ...updates } : p))
+    );
+    if (firebaseUser) {
+      const rowUpdates: Record<string, unknown> = {};
+      if (updates.caption !== undefined) rowUpdates.caption = updates.caption ?? null;
+      if (updates.extendedContent !== undefined) rowUpdates.extended_content = updates.extendedContent ?? null;
+      if (updates.content !== undefined) rowUpdates.content = updates.content;
+      db.processes.update(itemId, rowUpdates as any).then(({ error }) => {
+        if (error) console.error("Supabase process update:", error);
+      });
     }
   };
 
@@ -490,7 +532,10 @@ export function RootLabProvider({ children }: { children: ReactNode }) {
         addArtist,
         updateArtist,
         addProject,
+        updateProject,
+        deleteProject,
         addProcessItem,
+        updateProcessItem,
         addProcessExtension,
         deleteProcessItem,
         deleteArtist,
