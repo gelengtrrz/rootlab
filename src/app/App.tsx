@@ -1,12 +1,15 @@
 import React from "react";
 import { RouterProvider } from "react-router";
 import { router } from "./AppRoutes";
+import { AuthProvider } from "./context/AuthContext";
 import { RootLabProvider } from "./context/RootLabContext";
 
 export default function App() {
   return (
-    <RootLabProvider>
-      <RouterProvider router={router} />
-    </RootLabProvider>
+    <AuthProvider>
+      <RootLabProvider>
+        <RouterProvider router={router} />
+      </RootLabProvider>
+    </AuthProvider>
   );
 }

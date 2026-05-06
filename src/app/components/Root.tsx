@@ -1,14 +1,23 @@
 import React, { useState } from "react";
-import { Link, Outlet, useLocation } from "react-router";
+import { Link, Outlet, useLocation, useNavigate } from "react-router";
 import { Menu, X } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Toaster } from "sonner";
+import { useAuth } from "../context/AuthContext";
 
 export function Root() {
   const [menuOpen, setMenuOpen] = useState(false);
   const location = useLocation();
+  const navigate = useNavigate();
+  const { firebaseUser, authLoading, signOut } = useAuth();
 
   const toggleMenu = () => setMenuOpen(!menuOpen);
+
+  const handleSignOut = async () => {
+    await signOut();
+    setMenuOpen(false);
+    navigate("/");
+  };
 
   const navLinks = [
     { name: "Inicio", path: "/" },
@@ -17,7 +26,7 @@ export function Root() {
     { name: "Disciplinas", path: "/disciplinas" },
     { name: "Sobre el proceso", path: "/sobre-el-proceso" },
     { name: "Publicar proceso", path: "/publicar-proceso" },
-    { name: "Mi perfil", path: "/mi-perfil" }
+    { name: "Mi perfil", path: "/mi-perfil" },
   ];
 
   return (
@@ -78,7 +87,7 @@ export function Root() {
           </button>
         </div>
 
-        {/* Desktop Nav - Absolute to stay at the top of the page */}
+        {/* Desktop Nav */}
 <div className="hidden pointer-events-auto absolute top-24 left-10 text-sm tracking-wider font-sans uppercase z-[1000] space-y-2 mix-blend-difference text-white/80 hover:text-white transition-colors">
   <nav className="flex flex-col items-start gap-4">
             {navLinks.slice(1).map((link) => (
@@ -91,6 +100,26 @@ export function Root() {
                 <span className={`absolute bottom-0 left-0 w-full h-px bg-current transform origin-left transition-transform duration-300 ${location.pathname === link.path ? "scale-x-100" : "scale-x-0 group-hover:scale-x-100"}`}></span>
               </Link>
             ))}
+            {/* Auth link — desktop */}
+            {!authLoading && (
+              firebaseUser ? (
+                <button
+                  onClick={handleSignOut}
+                  className="relative group overflow-hidden text-left"
+                >
+                  <span className="relative z-10">Cerrar sesión</span>
+                  <span className="absolute bottom-0 left-0 w-full h-px bg-current transform origin-left scale-x-0 group-hover:scale-x-100 transition-transform duration-300" />
+                </button>
+              ) : (
+                <Link
+                  to="/auth"
+                  className={`relative group overflow-hidden ${location.pathname === "/auth" ? "text-white" : ""}`}
+                >
+                  <span className="relative z-10">Entrar</span>
+                  <span className={`absolute bottom-0 left-0 w-full h-px bg-current transform origin-left transition-transform duration-300 ${location.pathname === "/auth" ? "scale-x-100" : "scale-x-0 group-hover:scale-x-100"}`} />
+                </Link>
+              )
+            )}
           </nav>
         </div>
       </header>
@@ -122,6 +151,34 @@ className="fixed inset-0 bg-[#1a1a1a] z-[1100] flex items-center justify-center 
                   </Link>
                 </motion.div>
               ))}
+
+              {/* Auth link — mobile menu */}
+              {!authLoading && (
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: navLinks.length * 0.1 + 0.3 }}
+                >
+                  {firebaseUser ? (
+                    <button
+                      onClick={handleSignOut}
+                      className="text-white hover:text-[#cc4f38] transition-colors duration-300 text-lg uppercase tracking-tighter"
+                      style={{ fontFamily: "var(--font-serif)" }}
+                    >
+                      Cerrar sesión
+                    </button>
+                  ) : (
+                    <Link
+                      to="/auth"
+                      onClick={() => setMenuOpen(false)}
+                      className="text-white hover:text-[#cc4f38] transition-colors duration-300 text-lg uppercase tracking-tighter"
+                      style={{ fontFamily: "var(--font-serif)" }}
+                    >
+                      Entrar
+                    </Link>
+                  )}
+                </motion.div>
+              )}
             </nav>
           </motion.div>
         )}

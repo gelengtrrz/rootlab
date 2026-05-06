@@ -1,12 +1,14 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router";
 import { motion, AnimatePresence } from "motion/react";
 import { useRootLab } from "../context/RootLabContext";
+import { useAuth } from "../context/AuthContext";
 import { Image as ImageIcon, FileText, Link as LinkIcon, Music, Video, FolderPlus, ChevronRight, Check } from "lucide-react";
 import { toast } from "sonner";
 
 export function PublishProcess() {
   const { currentUser, addProcessItem, addProject, getArtistProjects } = useRootLab();
+  const { firebaseUser, authLoading } = useAuth();
   const navigate = useNavigate();
 
   // Step: "project" | "content"
@@ -26,7 +28,24 @@ export function PublishProcess() {
   });
   const [filePreview, setFilePreview] = useState<string | null>(null);
 
-  // — Guard: no profile —
+  // — Guard: not authenticated —
+  useEffect(() => {
+    if (!authLoading && !firebaseUser) {
+      navigate("/auth");
+    }
+  }, [firebaseUser, authLoading, navigate]);
+
+  if (authLoading) {
+    return (
+      <div className="w-full min-h-screen pt-40 flex items-start justify-center">
+        <span className="font-sans text-xs uppercase tracking-widest text-gray-400">Cargando…</span>
+      </div>
+    );
+  }
+
+  if (!firebaseUser) return null;
+
+  // — Guard: authenticated but no profile —
   if (!currentUser) {
     return (
       <div className="w-full min-h-screen pt-40 px-6 flex items-start justify-center relative overflow-hidden">

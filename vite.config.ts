@@ -66,6 +66,15 @@ export default defineConfig({
     },
   },
 
+  // Pre-bundle Firebase so Vite correctly resolves its browser ESM exports
+  optimizeDeps: {
+    include: [
+      'firebase/app',
+      'firebase/auth',
+      'firebase/firestore',
+    ],
+  },
+
   // File types to support raw imports. Never add .css, .tsx, or .ts files to this.
   assetsInclude: ['**/*.svg', '**/*.csv'],
 })

@@ -7,10 +7,19 @@ import { Artist, Discipline } from "../context/RootLabContext";
 import { motion } from "motion/react";
 import { useRootLab } from "../context/RootLabContext";
 import { useNavigate } from "react-router";
+import { useAuth } from "../context/AuthContext";
 
 export function MyProfile() {
   const { currentUser, setCurrentUser, addArtist, updateArtist, deleteArtist } = useRootLab();
+  const { firebaseUser, authLoading } = useAuth();
   const navigate = useNavigate();
+
+  // — Guard: not authenticated —
+  useEffect(() => {
+    if (!authLoading && !firebaseUser) {
+      navigate("/auth");
+    }
+  }, [firebaseUser, authLoading, navigate]);
 
   const defaultArtist: Partial<Artist> = {
     name: "",

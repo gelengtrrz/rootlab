@@ -16,6 +16,7 @@ import { DisciplineDanza } from "./components/DisciplineDanza";
 import { DisciplineArtesPlasticas } from "./components/DisciplineArtesPlasticas";
 import { DisciplineEscritura } from "./components/DisciplineEscritura";
 import { DisciplineDisenoGrafico } from "./components/DisciplineDisenoGrafico";
+import { AuthPage } from "./components/AuthPage";
 
 export const router = createHashRouter([
   {
@@ -36,6 +37,7 @@ export const router = createHashRouter([
       { path: "sobre-el-proceso", Component: About },
       { path: "publicar-proceso", Component: PublishProcess },
       { path: "mi-perfil", Component: MyProfile },
+      { path: "auth", Component: AuthPage },
       { path: "*", Component: NotFound },
     ],
   },
