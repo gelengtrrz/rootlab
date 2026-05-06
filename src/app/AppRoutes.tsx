@@ -17,6 +17,14 @@ import { DisciplineArtesPlasticas } from "./components/DisciplineArtesPlasticas"
 import { DisciplineEscritura } from "./components/DisciplineEscritura";
 import { DisciplineDisenoGrafico } from "./components/DisciplineDisenoGrafico";
 import { AuthPage } from "./components/AuthPage";
+import { sbAuth } from "../lib/supabase";
+
+/**
+ * Process any Supabase OAuth callback tokens BEFORE the hash router reads
+ * window.location. sbAuth.init() rewrites the URL hash to "#/mi-perfil"
+ * (a valid route) so createHashRouter never sees raw OAuth params as a path.
+ */
+sbAuth.init();
 
 export const router = createHashRouter([
   {

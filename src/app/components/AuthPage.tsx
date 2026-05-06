@@ -3,23 +3,33 @@ import { useNavigate, Link } from "react-router";
 import { motion } from "motion/react";
 import { useAuth } from "../context/AuthContext";
 
-function parseFirebaseError(code: string): string {
-  const map: Record<string, string> = {
-    "auth/email-already-in-use": "Este correo ya está en uso.",
-    "auth/invalid-email": "Correo electrónico no válido.",
-    "auth/weak-password": "La contraseña debe tener al menos 6 caracteres.",
-    "auth/user-not-found": "No existe ninguna cuenta con este correo.",
-    "auth/wrong-password": "Contraseña incorrecta.",
-    "auth/invalid-credential": "Credenciales inválidas. Verifica tu correo y contraseña.",
-    "auth/popup-closed-by-user": "Se cerró la ventana de Google. Inténtalo de nuevo.",
-    "auth/cancelled-popup-request": "Operación cancelada.",
-    "auth/network-request-failed": "Error de red. Comprueba tu conexión.",
-    "auth/too-many-requests": "Demasiados intentos. Espera un momento.",
-  };
-  return map[code] || "Ha ocurrido un error. Inténtalo de nuevo.";
+// Maps Supabase error messages to friendly Spanish strings
+function parseAuthError(message: string): string {
+  if (!message) return "Ha ocurrido un error. Inténtalo de nuevo.";
+  const m = message.toLowerCase();
+  if (m.includes("already registered") || m.includes("already in use"))
+    return "Este correo ya está en uso.";
+  if (
+    m.includes("invalid login credentials") ||
+    m.includes("invalid credentials") ||
+    m.includes("invalid email or password")
+  )
+    return "Correo o contraseña incorrectos.";
+  if (m.includes("user not found"))
+    return "No existe ninguna cuenta con este correo.";
+  if (m.includes("weak password") || m.includes("should be at least"))
+    return "La contraseña debe tener al menos 6 caracteres.";
+  if (m.includes("network") || m.includes("fetch") || m.includes("failed to fetch"))
+    return "Error de red. Comprueba tu conexión.";
+  if (m.includes("rate limit") || m.includes("too many"))
+    return "Demasiados intentos. Espera un momento.";
+  if (m.includes("email not confirmed") || m.includes("confirma"))
+    return "Confirma tu correo antes de iniciar sesión.";
+  // Fallback: show the original message (Supabase messages are user-readable)
+  return message;
 }
 
-// Minimal Google "G" logo as inline SVG
+// Minimal Google "G" SVG logo
 function GoogleIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
@@ -50,10 +60,11 @@ export function AuthPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const { signInWithEmail, signUpWithEmail, signInWithGoogle, firebaseUser, authLoading } = useAuth();
+  const { signInWithEmail, signUpWithEmail, signInWithGoogle, firebaseUser, authLoading } =
+    useAuth();
   const navigate = useNavigate();
 
-  // Redirect once authenticated
+  // Redirect once authenticated (handles both email and OAuth flows)
   useEffect(() => {
     if (!authLoading && firebaseUser) {
       navigate("/mi-perfil");
@@ -72,28 +83,21 @@ export function AuthPage() {
       }
       navigate("/mi-perfil");
     } catch (err: any) {
-      setError(parseFirebaseError(err.code));
+      setError(parseAuthError(err.message || ""));
     } finally {
       setLoading(false);
     }
   };
 
-  const handleGoogle = async () => {
-    setError("");
+  // Google OAuth is a full-page redirect — no async/catch needed
+  const handleGoogle = () => {
     setLoading(true);
-    try {
-      await signInWithGoogle();
-      navigate("/mi-perfil");
-    } catch (err: any) {
-      setError(parseFirebaseError(err.code));
-    } finally {
-      setLoading(false);
-    }
+    signInWithGoogle(); // browser navigates away; this never returns
   };
 
   return (
     <div className="w-full min-h-screen pt-32 px-6 flex items-start justify-center relative overflow-hidden bg-[#1a1a1a] text-[#f5f3ef]">
-      {/* Auras — mismas que inicio */}
+      {/* Auras */}
       <motion.div
         animate={{ opacity: [0.53, 0.05, 0.53] }}
         transition={{ duration: 5, repeat: Infinity, ease: "easeInOut" }}
@@ -139,7 +143,7 @@ export function AuthPage() {
           ))}
         </div>
 
-        {/* Google */}
+        {/* Google OAuth button */}
         <button
           type="button"
           onClick={handleGoogle}
@@ -157,7 +161,7 @@ export function AuthPage() {
           <div className="flex-1 h-px bg-white/10" />
         </div>
 
-        {/* Email/Password form */}
+        {/* Email / password form */}
         <form onSubmit={handleSubmit} className="space-y-7">
           <div className="space-y-2">
             <label className="font-sans text-xs uppercase tracking-widest text-gray-400">
@@ -202,7 +206,7 @@ export function AuthPage() {
           </button>
         </form>
 
-        {/* Switch mode hint */}
+        {/* Switch mode */}
         <p className="font-sans text-xs text-gray-500 mt-8 tracking-wide">
           {mode === "login" ? (
             <>
@@ -230,7 +234,9 @@ export function AuthPage() {
         </p>
 
         <p className="font-sans text-xs text-gray-600 mt-6 tracking-wide">
-          <Link to="/" className="hover:text-gray-400 transition-colors">← Volver al inicio</Link>
+          <Link to="/" className="hover:text-gray-400 transition-colors">
+            ← Volver al inicio
+          </Link>
         </p>
       </motion.div>
     </div>

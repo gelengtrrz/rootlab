@@ -66,14 +66,9 @@ export default defineConfig({
     },
   },
 
-  // Pre-bundle Firebase so Vite correctly resolves its browser ESM exports
-  optimizeDeps: {
-    include: [
-      'firebase/app',
-      'firebase/auth',
-    ],
-  },
+  // No special optimizeDeps needed — Supabase client uses native fetch only
+  // Firebase has been removed from the project
 
-  // File types to support raw imports. Never add .css, .tsx, or .ts files to this.
+  // File types to support raw imports.
   assetsInclude: ['**/*.svg', '**/*.csv'],
 })
