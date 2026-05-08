@@ -1,26 +1,34 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router";
 import { motion, AnimatePresence } from "motion/react";
-import { useRootLab } from "../context/RootLabContext";
 import { useAuth } from "../context/AuthContext";
+import { db } from "../lib/supabase";
 import { Image as ImageIcon, FileText, Link as LinkIcon, Music, Video, FolderPlus, ChevronRight, Check } from "lucide-react";
 import { toast } from "sonner";
 
+interface ProjectLocal {
+  id: string;
+  user_id: string;
+  title: string;
+  description: string;
+  cover_image: string;
+  discipline: string;
+  created_at: string;
+}
+
 export function PublishProcess() {
-  const { currentUser, addProcessItem, addProject, getArtistProjects } = useRootLab();
   const { firebaseUser, authLoading } = useAuth();
   const navigate = useNavigate();
 
-  // Step: "project" | "content"
+  const [hasProfile, setHasProfile] = useState<boolean | null>(null);
+  const [profileSlug, setProfileSlug] = useState<string>("");
+  const [profileDiscipline, setProfileDiscipline] = useState<string>("");
+  const [myProjects, setMyProjects] = useState<ProjectLocal[]>([]);
   const [step, setStep] = useState<"project" | "content">("project");
-
-  // Project step state
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [creatingNew, setCreatingNew] = useState(false);
   const [newProject, setNewProject] = useState({ title: "", description: "" });
   const [newProjectCover, setNewProjectCover] = useState<string | null>(null);
-
-  // Content step state
   const [formData, setFormData] = useState({
     type: "image" as "image" | "note" | "audio" | "video" | "link",
     content: "",
@@ -29,14 +37,40 @@ export function PublishProcess() {
   });
   const [filePreview, setFilePreview] = useState<string | null>(null);
 
-  // — Guard: not authenticated —
   useEffect(() => {
     if (!authLoading && !firebaseUser) {
       navigate("/auth");
     }
   }, [firebaseUser, authLoading, navigate]);
 
-  if (authLoading) {
+  useEffect(() => {
+    if (!firebaseUser) return;
+    const checkProfile = async () => {
+      const { data } = await db.profiles.getByUserId(firebaseUser.uid);
+      if (data && data.length > 0) {
+        setHasProfile(true);
+        setProfileSlug(data[0].slug || "");
+        setProfileDiscipline(data[0].discipline || "");
+      } else {
+        setHasProfile(false);
+      }
+    };
+    checkProfile();
+  }, [firebaseUser]);
+
+  useEffect(() => {
+    if (!firebaseUser || !hasProfile) return;
+    const loadProjects = async () => {
+      const { data } = await db.projects.loadAll();
+      if (data) {
+        const mine = data.filter((p: any) => p.user_id === firebaseUser.uid);
+        setMyProjects(mine);
+      }
+    };
+    loadProjects();
+  }, [firebaseUser, hasProfile]);
+
+  if (authLoading || hasProfile === null) {
     return (
       <div className="w-full min-h-screen pt-40 flex items-start justify-center">
         <span className="font-sans text-xs uppercase tracking-widest text-gray-400">Cargando…</span>
@@ -46,17 +80,14 @@ export function PublishProcess() {
 
   if (!firebaseUser) return null;
 
-  // — Guard: authenticated but no profile —
-  if (!currentUser) {
+  if (!hasProfile) {
     return (
       <div className="w-full min-h-screen pt-40 px-6 flex items-start justify-center relative overflow-hidden">
-        {/* Aura naranja — sincronizada */}
         <motion.div
           animate={{ opacity: [0.53, 0.05, 0.53] }}
           transition={{ duration: 5, repeat: Infinity, ease: "easeInOut" }}
           className="absolute -top-10 right-10 w-64 h-64 bg-[#cc4f38] rounded-full filter blur-3xl pointer-events-none"
         />
-        {/* Aura marrón — sincronizada */}
         <motion.div
           animate={{ opacity: [0.53, 0.05, 0.53] }}
           transition={{ duration: 5, repeat: Infinity, ease: "easeInOut" }}
@@ -80,12 +111,7 @@ export function PublishProcess() {
     );
   }
 
-  const myProjects = getArtistProjects(currentUser.id);
-
-  // Resolve the selected project object (for display in step 2)
   const selectedProject = myProjects.find(p => p.id === selectedProjectId);
-
-  // ── Handlers: project step ──────────────────────────────────────────────
 
   const handleSelectExisting = (id: string) => {
     setSelectedProjectId(id);
@@ -108,7 +134,7 @@ export function PublishProcess() {
     }
   };
 
-  const handleProjectContinue = () => {
+  const handleProjectContinue = async () => {
     if (creatingNew) {
       if (!newProject.title.trim() || !newProject.description.trim()) {
         toast.error("Completa el título y la descripción del proyecto.");
@@ -118,14 +144,23 @@ export function PublishProcess() {
         toast.error("Añade una foto de portada para el proyecto.");
         return;
       }
-      const created = addProject({
-        artistId: currentUser.id,
+      const newId = crypto.randomUUID();
+      const row = {
+        id: newId,
+        user_id: firebaseUser.uid,
         title: newProject.title.trim(),
         description: newProject.description.trim(),
-        coverImage: newProjectCover,
-        discipline: currentUser.discipline
-      });
-      setSelectedProjectId(created.id);
+        cover_image: newProjectCover,
+        discipline: profileDiscipline,
+        created_at: new Date().toISOString(),
+      };
+      const { error } = await db.projects.insert(row);
+      if (error) {
+        toast.error("Error al crear el proyecto");
+        return;
+      }
+      setMyProjects(prev => [...prev, row]);
+      setSelectedProjectId(newId);
     } else {
       if (!selectedProjectId) {
         toast.error("Selecciona un proyecto o crea uno nuevo.");
@@ -134,8 +169,6 @@ export function PublishProcess() {
     }
     setStep("content");
   };
-
-  // ── Handlers: content step ──────────────────────────────────────────────
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -157,9 +190,8 @@ export function PublishProcess() {
     setFilePreview(null);
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-
     let finalContent = formData.content;
     if (["image", "audio", "video"].includes(formData.type)) {
       if (!filePreview) {
@@ -168,24 +200,27 @@ export function PublishProcess() {
       }
       finalContent = filePreview;
     }
-
-    addProcessItem({
-      artistId: currentUser.id,
-      projectId: selectedProjectId!,
+    const row = {
+      id: crypto.randomUUID(),
+      user_id: firebaseUser.uid,
+      project_id: selectedProjectId,
       type: formData.type,
       content: finalContent,
       caption: formData.caption,
-      extendedContent: formData.extendedContent
-    });
-
+      extended_content: formData.extendedContent,
+      extensions: [],
+      created_at: new Date().toISOString(),
+    };
+    const { error } = await db.processes.insert(row);
+    if (error) {
+      toast.error("Error al publicar el proceso", { description: error });
+      return;
+    }
     toast.success("Proceso publicado", {
       description: "Tu fragmento de proceso se ha añadido al proyecto."
     });
-
-    navigate(`/artistas/${currentUser.slug}`);
+    navigate(`/artistas/${profileSlug}`);
   };
-
-  // ── Render ───────────────────────────────────────────────────────────────
 
   return (
     <div className="w-full min-h-screen pt-32 px-6 md:px-12 lg:px-20 relative">
@@ -195,12 +230,10 @@ export function PublishProcess() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6 }}
         >
-          {/* Title */}
           <h1 className="text-4xl md:text-6xl lg:text-8xl font-serif italic text-[#1a1a1a] mb-6">
             Documentar Proceso
           </h1>
 
-          {/* Step indicator */}
           <div className="flex items-center gap-3 mb-12">
             <div className={`flex items-center gap-2 font-sans text-xs uppercase tracking-widest ${step === "project" ? "text-[#1a1a1a]" : "text-gray-400"}`}>
               <span className={`w-6 h-6 flex items-center justify-center border text-xs ${step === "project" ? "border-[#1a1a1a] bg-[#1a1a1a] text-white" : "border-gray-300 text-gray-400"}`}>
@@ -217,7 +250,6 @@ export function PublishProcess() {
             </div>
           </div>
 
-          {/* ── STEP 1: Project ── */}
           <AnimatePresence mode="wait">
             {step === "project" && (
               <motion.div
@@ -232,7 +264,6 @@ export function PublishProcess() {
                   Antes de añadir contenido, indica a qué proyecto pertenece este fragmento de proceso.
                 </p>
 
-                {/* Existing projects */}
                 {myProjects.length > 0 && (
                   <div className="space-y-4">
                     <label className="font-sans text-xs uppercase tracking-widest text-gray-500 block">
@@ -251,9 +282,9 @@ export function PublishProcess() {
                           }`}
                         >
                           <div className="flex items-center gap-4">
-                            {project.coverImage && (
+                            {project.cover_image && (
                               <div className="w-10 h-10 flex-shrink-0 overflow-hidden">
-                                <img src={project.coverImage} alt="" className="w-full h-full object-cover" />
+                                <img src={project.cover_image} alt="" className="w-full h-full object-cover" />
                               </div>
                             )}
                             <div>
@@ -272,7 +303,6 @@ export function PublishProcess() {
                   </div>
                 )}
 
-                {/* Create new project */}
                 <div className="space-y-4">
                   <button
                     type="button"
@@ -311,7 +341,6 @@ export function PublishProcess() {
                             />
                           </div>
 
-                          {/* Cover photo — required */}
                           <div className="space-y-3">
                             <label className="font-sans text-xs uppercase tracking-widest text-gray-500">
                               Foto de portada <span className="text-[#cc4f38]">*</span>
@@ -334,7 +363,7 @@ export function PublishProcess() {
                                   className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:border-0 file:text-xs file:font-sans file:uppercase file:tracking-widest file:bg-gray-100 file:text-gray-700 hover:file:bg-gray-200 cursor-pointer"
                                 />
                                 <p className="mt-2 font-sans text-xs text-gray-400">
-                                  Una foto representativa del proyecto. Podrás cambiarla después.
+                                  Una foto representativa del proyecto.
                                 </p>
                               </div>
                             </div>
@@ -369,7 +398,6 @@ export function PublishProcess() {
               </motion.div>
             )}
 
-            {/* ── STEP 2: Content ── */}
             {step === "content" && (
               <motion.div
                 key="step-content"
@@ -379,12 +407,11 @@ export function PublishProcess() {
                 transition={{ duration: 0.4 }}
                 className="space-y-10"
               >
-                {/* Project context banner */}
                 <div className="border-l-4 border-[#cc4f38] pl-5 py-1 flex items-center gap-4">
-                  {(selectedProject?.coverImage || newProjectCover) && (
+                  {(selectedProject?.cover_image || newProjectCover) && (
                     <div className="w-10 h-10 flex-shrink-0 overflow-hidden">
                       <img
-                        src={selectedProject?.coverImage || newProjectCover || ""}
+                        src={selectedProject?.cover_image || newProjectCover || ""}
                         alt=""
                         className="w-full h-full object-cover"
                       />
@@ -406,11 +433,10 @@ export function PublishProcess() {
                 </div>
 
                 <p className="font-sans text-gray-600 max-w-lg">
-                  Añade un nuevo fragmento a este proyecto. Puede ser una imagen de tu estudio, una nota mental, un audio o un enlace a una referencia.
+                  Añade un nuevo fragmento a este proyecto.
                 </p>
 
                 <form onSubmit={handleSubmit} className="space-y-10">
-                  {/* Type selector */}
                   <div className="space-y-4">
                     <label className="font-sans text-xs uppercase tracking-widest text-gray-500 block">Tipo de contenido</label>
                     <div className="flex flex-wrap gap-4">
@@ -438,7 +464,6 @@ export function PublishProcess() {
                     </div>
                   </div>
 
-                  {/* Content input */}
                   <div className="space-y-2">
                     <label className="font-sans text-xs uppercase tracking-widest text-gray-500">
                       {formData.type === "note" ? "Texto de la nota" :
@@ -471,20 +496,15 @@ export function PublishProcess() {
                           </div>
                         )}
                         {filePreview && formData.type === "video" && (
-                          <div className="p-4 bg-gray-50 border border-black/20 flex items-center justify-center">
-                            <video src={filePreview} controls className="w-full max-h-48" />
-                          </div>
+                          <video src={filePreview} controls className="w-full max-h-48" />
                         )}
                         {filePreview && formData.type === "audio" && (
-                          <div className="p-4 bg-gray-50 border border-black/20 flex items-center justify-center">
-                            <audio src={filePreview} controls className="w-full" />
-                          </div>
+                          <audio src={filePreview} controls className="w-full" />
                         )}
                       </div>
                     )}
                   </div>
 
-                  {/* Caption */}
                   <div className="space-y-2">
                     <label className="font-sans text-xs uppercase tracking-widest text-gray-500">Descripción breve</label>
                     <input
@@ -494,13 +514,12 @@ export function PublishProcess() {
                     />
                   </div>
 
-                  {/* Extended */}
                   <div className="space-y-2">
                     <label className="font-sans text-xs uppercase tracking-widest text-gray-500">Contexto extendido (Opcional)</label>
                     <textarea
                       name="extendedContent" value={formData.extendedContent} onChange={handleChange} rows={4}
                       className="w-full bg-transparent border-b border-black/20 pb-3 focus:outline-none focus:border-black font-serif text-xl resize-none"
-                      placeholder="Añade más contexto, reflexiones o detalles sobre este paso de tu proceso..."
+                      placeholder="Añade más contexto, reflexiones o detalles..."
                     />
                   </div>
 
