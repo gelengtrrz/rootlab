@@ -6,7 +6,7 @@ import { MOCK_DISCIPLINES } from "../data/mockData";
 import { motion } from "motion/react";
 import { useNavigate } from "react-router";
 import { useAuth } from "../context/AuthContext";
-import { db, ProfileRow } from "../lib/supabase";
+import { db, ProfileRow } from "../../lib/supabase";
 
 interface ProfileForm {
   name: string;

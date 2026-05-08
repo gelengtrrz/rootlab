@@ -3,7 +3,7 @@ import { useParams, useNavigate } from "react-router";
 import { motion, AnimatePresence } from "motion/react";
 import Masonry, { ResponsiveMasonry } from "react-responsive-masonry";
 import { useAuth } from "../context/AuthContext";
-import { db, ProfileRow } from "../lib/supabase";
+import { db, ProfileRow } from "../../lib/supabase";
 import { Image, Type, Link as LinkIcon, Plus, Send, Settings, ChevronDown, ChevronUp, Music, Video, FolderPlus, Trash2, Mail, Pencil } from "lucide-react";
 import { toast } from "sonner";
 
@@ -421,7 +421,7 @@ export function ArtistProfile() {
                     <Trash2 size={14} /> Eliminar Perfil
                   </button>
                 )}
-                
+                <a
                   href={`mailto:${artist.contact_email || ""}`}
                   className="px-6 py-3 border border-black bg-black text-white font-sans uppercase tracking-widest text-[10px] hover:bg-transparent hover:text-black transition-colors flex items-center gap-2"
                 >

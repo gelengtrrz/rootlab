@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { motion } from "motion/react";
-import { db, ProfileRow } from "../lib/supabase";
+import { db, ProfileRow } from "../../lib/supabase";
 
 export function Artists() {
   const [artists, setArtists] = useState<ProfileRow[]>([]);

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router";
 import { motion, AnimatePresence } from "motion/react";
 import { useAuth } from "../context/AuthContext";
-import { db } from "../lib/supabase";
+import { db } from "../../lib/supabase";
 import { Image as ImageIcon, FileText, Link as LinkIcon, Music, Video, FolderPlus, ChevronRight, Check } from "lucide-react";
 import { toast } from "sonner";
 
