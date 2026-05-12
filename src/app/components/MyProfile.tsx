@@ -83,19 +83,41 @@ export function MyProfile() {
   const onSubmit = async (data: ProfileForm) => {
     if (!firebaseUser) return;
     const slug = data.name.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
-    const row: Omit<ProfileRow, "created_at"> = {
-      user_id: firebaseUser.uid,
-      name: data.name,
-      slug,
-      bio: data.bio,
-      location: data.location,
-      discipline: data.discipline,
-      avatar_url: data.avatarUrl,
-      contact_email: data.contactEmail || null,
-      theme_color: data.themeColor,
-      theme_font: null,
-    };
-    const { error } = await db.profiles.upsert(row);
+if (hasProfile) {
+  const { error } = await db.profiles.update(firebaseUser.uid, {
+    name: data.name,
+    slug,
+    bio: data.bio,
+    location: data.location,
+    discipline: data.discipline,
+    avatar_url: data.avatarUrl,
+    contact_email: data.contactEmail || null,
+    theme_color: data.themeColor,
+    theme_font: null,
+  });
+  if (error) {
+    toast.error("Error al guardar el perfil", { description: error });
+    return;
+  }
+} else {
+  const row: Omit<ProfileRow, "created_at"> = {
+    user_id: firebaseUser.uid,
+    name: data.name,
+    slug,
+    bio: data.bio,
+    location: data.location,
+    discipline: data.discipline,
+    avatar_url: data.avatarUrl,
+    contact_email: data.contactEmail || null,
+    theme_color: data.themeColor,
+    theme_font: null,
+  };
+  const { error } = await db.profiles.upsert(row);
+  if (error) {
+    toast.error("Error al guardar el perfil", { description: error });
+    return;
+  }
+}
     if (error) {
       toast.error("Error al guardar el perfil", { description: error });
     } else {
