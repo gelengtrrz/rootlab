@@ -4,8 +4,6 @@
  */
 import { projectId, publicAnonKey } from "../../utils/supabase/info";
 
-// ── Constants ─────────────────────────────────────────────────────────────────
-
 const REST_BASE = `https://${projectId}.supabase.co/rest/v1`;
 const AUTH_BASE = `https://${projectId}.supabase.co/auth/v1`;
 const SESSION_KEY = "rootlab_session_v1";
@@ -15,12 +13,10 @@ const ANON_HEADERS = {
   "Content-Type": "application/json",
 };
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-
 export interface SupabaseSession {
   access_token: string;
   refresh_token: string;
-  uid: string;   // Supabase user UUID (used as user_id in DB tables)
+  uid: string;
   email: string;
 }
 
@@ -63,8 +59,6 @@ export interface ProcessRow {
 
 type DbResult<T> = { data: T | null; error: string | null };
 
-// ── Auth – internal session state ─────────────────────────────────────────────
-
 type SessionListener = (session: SupabaseSession | null) => void;
 let _session: SupabaseSession | null = null;
 const _listeners: SessionListener[] = [];
@@ -78,7 +72,7 @@ function persistSession(s: SupabaseSession | null) {
   try {
     if (s) localStorage.setItem(SESSION_KEY, JSON.stringify(s));
     else localStorage.removeItem(SESSION_KEY);
-  } catch {/* storage quota */}
+  } catch {}
   emitSession(s);
 }
 
@@ -98,11 +92,8 @@ async function tokenResponseToSession(res: Response): Promise<SupabaseSession> {
       body.error_description || body.msg || body.error || `Error ${res.status}`
     );
   }
-  // Supabase signup without email confirmation returns user but no access_token
   if (!body.access_token) {
-    throw new Error(
-      "Revisa tu correo y confirma tu cuenta antes de iniciar sesión."
-    );
+    throw new Error("Revisa tu correo y confirma tu cuenta antes de iniciar sesión.");
   }
   const payload = decodeJwtPayload(body.access_token);
   if (!payload?.sub) throw new Error("Token de autenticación inválido.");
@@ -116,16 +107,9 @@ async function tokenResponseToSession(res: Response): Promise<SupabaseSession> {
   return session;
 }
 
-// ── Auth – public API ─────────────────────────────────────────────────────────
-
 export const sbAuth = {
-  /** Returns the current in-memory session. */
   getSession(): SupabaseSession | null { return _session; },
 
-  /**
-   * Subscribe to session changes.
-   * Returns an unsubscribe function.
-   */
   onSessionChange(fn: SessionListener): () => void {
     _listeners.push(fn);
     return () => {
@@ -134,13 +118,7 @@ export const sbAuth = {
     };
   },
 
-  /**
-   * Must be called once on app startup.
-   * Reads OAuth callback tokens from the URL hash (after Google redirect)
-   * and falls back to localStorage.
-   */
   init(): SupabaseSession | null {
-    // 1. OAuth callback: tokens in URL hash
     const hash = typeof window !== "undefined" ? window.location.hash : "";
     if (hash) {
       const p = new URLSearchParams(hash.slice(1));
@@ -156,8 +134,6 @@ export const sbAuth = {
             email: payload.email || "",
           };
           persistSession(session);
-          // Rewrite to a valid hash-router path so createHashRouter gets a
-          // clean route (must happen BEFORE the router reads window.location)
           window.history.replaceState(
             {},
             "",
@@ -167,20 +143,16 @@ export const sbAuth = {
         }
       }
     }
-
-    // 2. Restore from localStorage
     try {
       const raw = localStorage.getItem(SESSION_KEY);
       if (raw) {
         const s = JSON.parse(raw) as SupabaseSession;
         if (s?.access_token) { _session = s; return s; }
       }
-    } catch {/* ignore */}
-
+    } catch {}
     return null;
   },
 
-  /** Email/password registration. */
   async signUpWithEmail(email: string, password: string): Promise<SupabaseSession> {
     const res = await fetch(`${AUTH_BASE}/signup`, {
       method: "POST",
@@ -190,7 +162,6 @@ export const sbAuth = {
     return tokenResponseToSession(res);
   },
 
-  /** Email/password sign-in. */
   async signInWithEmail(email: string, password: string): Promise<SupabaseSession> {
     const res = await fetch(`${AUTH_BASE}/token?grant_type=password`, {
       method: "POST",
@@ -200,23 +171,11 @@ export const sbAuth = {
     return tokenResponseToSession(res);
   },
 
-  /**
-   * Redirects the browser to Supabase's Google OAuth endpoint.
-   * After authorization, Supabase redirects back to `window.location.origin`
-   * with tokens in the URL hash — handled by `sbAuth.init()` on the next load.
-   *
-   * The Google OAuth credentials must be configured in:
-   * Supabase Dashboard → Authentication → Providers → Google
-   * Client ID:     310466989293-nc92v3ha58soau7h0n65dmnv1c655fu9.apps.googleusercontent.com
-   * Client Secret: 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
-   */
   signInWithGoogle(): void {
     const redirectTo = encodeURIComponent(window.location.origin);
-    window.location.href =
-      `${AUTH_BASE}/authorize?provider=google&redirect_to=${redirectTo}`;
+    window.location.href = `${AUTH_BASE}/authorize?provider=google&redirect_to=${redirectTo}`;
   },
 
-  /** Sign out and clear session. */
   async signOut(): Promise<void> {
     if (_session?.access_token) {
       await fetch(`${AUTH_BASE}/logout`, {
@@ -225,12 +184,11 @@ export const sbAuth = {
           ...ANON_HEADERS,
           Authorization: `Bearer ${_session.access_token}`,
         },
-      }).catch(() => {/* best-effort */});
+      }).catch(() => {});
     }
     persistSession(null);
   },
 
-  /** Refresh access token using the stored refresh token. */
   async refresh(): Promise<SupabaseSession | null> {
     if (!_session?.refresh_token) return null;
     const res = await fetch(`${AUTH_BASE}/token?grant_type=refresh_token`, {
@@ -243,9 +201,6 @@ export const sbAuth = {
   },
 };
 
-// ── DB – helpers ──────────────────────────────────────────────────────────────
-
-/** Returns headers with the user's JWT (for writes) or the anon key (for public reads). */
 function makeHeaders(useAuth = false): Record<string, string> {
   const bearer = (useAuth && _session?.access_token) ? _session.access_token : publicAnonKey;
   return {
@@ -328,18 +283,13 @@ async function restDelete(
   }
 }
 
-// ── DB – public API ───────────────────────────────────────────────────────────
-
 export const db = {
   profiles: {
-    /** Read all profiles — visible to every visitor. */
     loadAll: () => restGet<ProfileRow[]>("profiles"),
 
-    /** Read a single profile by Supabase user UID. Returns array of 0 or 1. */
     getByUserId: (uid: string) =>
       restGet<ProfileRow[]>("profiles", { user_id: `eq.${uid}` }),
 
-    /** Create or update a profile (upsert on user_id primary key). */
     upsert: (row: Omit<ProfileRow, "created_at">) =>
       restPost<ProfileRow>(
         "profiles",
@@ -347,51 +297,43 @@ export const db = {
         "resolution=merge-duplicates,return=representation"
       ),
 
-    /** Delete a profile by Supabase user UID. */
+    update: (uid: string, updates: Partial<Omit<ProfileRow, "created_at">>) =>
+      restPatch<ProfileRow>("profiles", { user_id: `eq.${uid}` }, updates),
+
     delete: (uid: string) =>
       restDelete("profiles", { user_id: `eq.${uid}` }),
   },
 
   projects: {
-    /** Read all projects, newest first — visible to every visitor. */
     loadAll: () =>
       restGet<ProjectRow[]>("projects", { order: "created_at.desc" }),
 
-    /** Insert a new project item. */
     insert: (row: ProjectRow) =>
       restPost<ProjectRow>("projects", row, "return=representation"),
 
-    /** Delete a single project by UUID. */
     delete: (id: string) =>
       restDelete("projects", { id: `eq.${id}` }),
 
-    /** Delete all projects owned by a given Supabase user UID. */
     deleteByUser: (uid: string) =>
       restDelete("projects", { user_id: `eq.${uid}` }),
 
-    /** Patch (update) fields on a single project item. */
     update: (id: string, updates: Partial<Omit<ProjectRow, "id" | "user_id" | "created_at">>) =>
       restPatch<ProjectRow>("projects", { id: `eq.${id}` }, updates),
   },
 
   processes: {
-    /** Read all processes, newest first — visible to every visitor. */
     loadAll: () =>
       restGet<ProcessRow[]>("processes", { order: "created_at.desc" }),
 
-    /** Insert a new process item. */
     insert: (row: ProcessRow) =>
       restPost<ProcessRow>("processes", row, "return=representation"),
 
-    /** Delete a single process by UUID. */
     delete: (id: string) =>
       restDelete("processes", { id: `eq.${id}` }),
 
-    /** Delete all processes owned by a given Supabase user UID. */
     deleteByUser: (uid: string) =>
       restDelete("processes", { user_id: `eq.${uid}` }),
 
-    /** Patch (update) fields on a single process item. */
     update: (id: string, updates: Partial<Omit<ProcessRow, "id" | "user_id" | "created_at">>) =>
       restPatch<ProcessRow>("processes", { id: `eq.${id}` }, updates),
   },

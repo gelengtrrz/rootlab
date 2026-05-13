@@ -83,41 +83,33 @@ export function MyProfile() {
   const onSubmit = async (data: ProfileForm) => {
     if (!firebaseUser) return;
     const slug = data.name.toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
-if (hasProfile) {
-  const { error } = await db.profiles.update(firebaseUser.uid, {
-    name: data.name,
-    slug,
-    bio: data.bio,
-    location: data.location,
-    discipline: data.discipline,
-    avatar_url: data.avatarUrl,
-    contact_email: data.contactEmail || null,
-    theme_color: data.themeColor,
-    theme_font: null,
-  });
-  if (error) {
-    toast.error("Error al guardar el perfil", { description: error });
-    return;
-  }
-} else {
-  const row: Omit<ProfileRow, "created_at"> = {
-    user_id: firebaseUser.uid,
-    name: data.name,
-    slug,
-    bio: data.bio,
-    location: data.location,
-    discipline: data.discipline,
-    avatar_url: data.avatarUrl,
-    contact_email: data.contactEmail || null,
-    theme_color: data.themeColor,
-    theme_font: null,
-  };
-  const { error } = await db.profiles.upsert(row);
-  if (error) {
-    toast.error("Error al guardar el perfil", { description: error });
-    return;
-  }
-}
+
+    const updates = {
+      name: data.name,
+      slug,
+      bio: data.bio,
+      location: data.location,
+      discipline: data.discipline,
+      avatar_url: data.avatarUrl,
+      contact_email: data.contactEmail || null,
+      theme_color: data.themeColor,
+      theme_font: null,
+    };
+
+    let error: string | null = null;
+
+    if (hasProfile) {
+      const result = await db.profiles.update(firebaseUser.uid, updates);
+      error = result.error;
+    } else {
+      const row: Omit<ProfileRow, "created_at"> = {
+        user_id: firebaseUser.uid,
+        ...updates,
+      };
+      const result = await db.profiles.upsert(row);
+      error = result.error;
+    }
+
     if (error) {
       toast.error("Error al guardar el perfil", { description: error });
     } else {
@@ -244,7 +236,9 @@ if (hasProfile) {
                       {formValues.avatarUrl ? (
                         <img src={formValues.avatarUrl} alt="Preview" className="w-full h-full object-cover" />
                       ) : (
-                        <div className="w-full h-full flex items-center justify-center text-gray-500"><ImageIcon size={20} /></div>
+                        <div className="w-full h-full flex items-center justify-center text-gray-500">
+                          <ImageIcon size={20} />
+                        </div>
                       )}
                     </div>
                     <div className="flex-grow">
