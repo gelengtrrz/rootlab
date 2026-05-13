@@ -31,7 +31,6 @@ export function Root() {
 
   return (
     <div className="min-h-screen flex flex-col relative overflow-x-hidden">
-<div className="noise-overlay pointer-events-none" style={{ opacity: 0.3 }}></div>
       {/* Floating Header */}
       <header className="absolute top-0 left-0 w-full z-[1200] pointer-events-none p-6 md:p-10 flex justify-between items-start">
         <Link 
