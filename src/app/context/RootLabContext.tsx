@@ -306,9 +306,9 @@ function mergeById<T extends { id: string }>(base: T[], incoming: T[]): T[] {
 export function RootLabProvider({ children }: { children: ReactNode }) {
   const { firebaseUser, authLoading } = useAuth();
 
-  const [artists, setArtists] = useState<Artist[]>(MOCK_ARTISTS);
-  const [projects, setProjects] = useState<Project[]>(MOCK_PROJECTS);
-  const [processFeed, setProcessFeed] = useState<ProcessItem[]>(MOCK_PROCESS);
+  const [artists, setArtists] = useState<Artist[]>([]);
+const [projects, setProjects] = useState<Project[]>([]);
+const [processFeed, setProcessFeed] = useState<ProcessItem[]>([]);
   const [currentUser, setCurrentUserState] = useState<Artist | null>(null);
 
   // ── Load all public Supabase data on mount ────────────────────────────────
